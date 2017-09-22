@@ -27,6 +27,15 @@ public enum BrokerSettingKey implements SettingKey {
      */
     CONFIGURATION_URI("broker.connector.descriptor.configuration.uri"),
     /**
+     * Broker IP resolver implementation (if not evaluated, the default resolver will be used).
+     */
+
+    BROKER_IP_RESOLVER_CLASS_NAME("broker.ip_resolver_class_name"),
+    /**
+     * Broker IP used by the default resolver.
+     */
+    BROKER_IP("broker.ip"),
+	 /**
      * Broker name (used also for the vm connector name)
      */
     BROKER_NAME("broker.name");
