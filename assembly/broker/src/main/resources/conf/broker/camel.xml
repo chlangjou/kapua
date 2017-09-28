@@ -150,11 +150,15 @@
                 <to uri="activemq:queue:notProcessableMessage"/>
             </onException>
             <pipeline>
-                <bean ref="kapuaCamelFilter" method="bindSession"/>
-                <dynamicRouter>
-                    <method ref="kapuaCamelDefaultRouter" method="defaultRouter" ></method>
-                </dynamicRouter>
-                <bean ref="kapuaCamelFilter" method="unbindSession"/>
+                <doTry>
+                    <bean ref="kapuaCamelFilter" method="bindSession"/>
+                    <dynamicRouter>
+                        <method ref="kapuaCamelDefaultRouter" method="defaultRouter" ></method>
+                    </dynamicRouter>
+                    <doFinally>
+                        <bean ref="kapuaCamelFilter" method="unbindSession"/>
+                    </doFinally>
+                </doTry>
             </pipeline>
         </route>
         <route errorHandlerRef="messageErrorHandler" id="dataMessageCommunicationErrorRoute">

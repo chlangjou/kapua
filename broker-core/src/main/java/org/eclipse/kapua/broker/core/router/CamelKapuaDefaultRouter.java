@@ -14,7 +14,6 @@ package org.eclipse.kapua.broker.core.router;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-import org.apache.camel.DynamicRouter;
 import org.apache.camel.Exchange;
 import org.apache.camel.Header;
 import org.apache.camel.Properties;
@@ -52,19 +51,17 @@ public class CamelKapuaDefaultRouter {
     private final static String DST_APPS = "bean:kapuaLifeCycleConverter?method=convertToApps,bean:deviceMessageListener?method=processAppsMessage";
     private final static String DST_MISSING = "bean:kapuaLifeCycleConverter?method=convertToMissing,bean:deviceMessageListener?method=processMissingMessage";
     private final static String DST_NOTIFY = "bean:kapuaLifeCycleConverter?method=convertToNotify,bean:deviceMessageListener?method=processNotifyMessage";
-    private final static String DST_UNMATCHED = "bean:kapuaLifeCycleConverter?method=convertToUnmatched,bean:deviceMessageListener?method=processUnmatchedMessage";
+    private final static String DST_UNMATCHED = "activemq:queue:lifeCycleUnmatchedMessage";
     private final static String DST_DATA = "bean:kapuaDataConverter?method=convertToData,bean:dataStorageMessageProcessor?method=processMessage";
 
     public CamelKapuaDefaultRouter() {
     }
 
-    @DynamicRouter(delimiter = ",")
     public String defaultRouter(Exchange exchange, Object value, @Header(Exchange.SLIP_ENDPOINT) String previous, @Properties Map<String, Object> properties) {
         logger.trace("Received message on topic {} - Previous slip endpoint {} - id {}",
                 new Object[] { exchange.getIn().getHeader(MessageConstants.PROPERTY_ORIGINAL_TOPIC, String.class), previous,
                         exchange.getIn().getHeader(CamelConstants.JMS_CORRELATION_ID) });
         if (previous != null) {
-            exchange.setIn(null);
             return null;
         } else {
             String originaTopic = exchange.getIn().getHeader(MessageConstants.PROPERTY_ORIGINAL_TOPIC, String.class);

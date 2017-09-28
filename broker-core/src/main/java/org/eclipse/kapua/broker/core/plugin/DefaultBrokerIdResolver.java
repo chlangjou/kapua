@@ -11,18 +11,17 @@
  *******************************************************************************/
 package org.eclipse.kapua.broker.core.plugin;
 
+import org.apache.activemq.broker.BrokerFilter;
+
 /**
- * Resolves the internal broker address.
- * 
+ * Lookup from the broker filter
+ *
  * @since 1.0
  */
-public interface IpResolver {
+public class DefaultBrokerIdResolver implements BrokerIdResolver {
 
-    /**
-     * Resolve the broker address (private ip)
-     * 
-     * @return
-     */
-    String getBrokerIpOrHostName();
-
+    @Override
+    public String getBrokerId(BrokerFilter brokerFilter) {
+        return brokerFilter.getBrokerId().getValue();
+    }
 }
