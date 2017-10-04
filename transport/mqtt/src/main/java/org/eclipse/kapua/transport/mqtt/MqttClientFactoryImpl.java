@@ -17,6 +17,10 @@ import org.eclipse.kapua.transport.TransportClientFactory;
 import org.eclipse.kapua.transport.message.mqtt.MqttMessage;
 import org.eclipse.kapua.transport.message.mqtt.MqttPayload;
 import org.eclipse.kapua.transport.message.mqtt.MqttTopic;
+import org.eclipse.kapua.transport.mqtt.setting.MqttClientSetting;
+import org.eclipse.kapua.transport.mqtt.setting.MqttClientSettingKeys;
+
+import java.util.Map;
 
 /**
  * Implementation of {@link TransportClientFactory} API for MQTT transport facade
@@ -28,9 +32,9 @@ import org.eclipse.kapua.transport.message.mqtt.MqttTopic;
 public class MqttClientFactoryImpl implements TransportClientFactory<MqttTopic, MqttPayload, MqttMessage, MqttMessage, MqttFacade, MqttClientConnectionOptions> {
 
     @Override
-    public MqttFacade getFacade()
+    public MqttFacade getFacade(Map<String, Object> configParameters)
             throws KapuaException {
-        return new MqttFacade();
+        return new MqttFacade(formatBrokerUri(configParameters.get("serverIp").toString()));
     }
 
     @Override
@@ -38,4 +42,7 @@ public class MqttClientFactoryImpl implements TransportClientFactory<MqttTopic, 
         return new MqttClientConnectionOptions();
     }
 
+    private String formatBrokerUri(String serverIp) {
+        return MqttClientSetting.getInstance().getString(MqttClientSettingKeys.TRANSPORT_SCHEME) + "://" + serverIp + ":" + MqttClientSetting.getInstance().getString(MqttClientSettingKeys.TRANSPORT_PORT);
+    }
 }
