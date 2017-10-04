@@ -28,7 +28,7 @@ public enum SystemSettingKey implements SettingKey {
     /**
      * System administration account name
      */
-    SYS_ADMIN_ACCOUNT("commons.sys.admin.account"),
+    SYS_ADMIN_USERNAME("commons.sys.admin.userName"),
 
     /**
      * Software version

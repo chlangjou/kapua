@@ -552,7 +552,7 @@ public class KapuaSecurityBrokerFilter extends BrokerFilter {
 
             // 3) check authorization
             DefaultAuthorizationMap authMap = null;
-            if (isAdminUser(username)) {
+            if (isAdminUser(kbcc)) {
                 metricLoginKapuasysTokenAttempt.inc();
                 // 3-1) admin authMap
                 authMap = buildAdminAuthMap(authDestinations, principal, fullClientId);
@@ -818,7 +818,6 @@ public class KapuaSecurityBrokerFilter extends BrokerFilter {
             try {
 
                 KapuaSecurityContext kapuaSecurityContext = getKapuaSecurityContext(context);
-
                 // TODO fix the kapua session when run as feature will be implemented
                 KapuaPrincipal kapuaPrincipal = ((KapuaPrincipal) kapuaSecurityContext.getMainPrincipal());
                 KapuaSession kapuaSession = new KapuaSession(null,
@@ -829,14 +828,14 @@ public class KapuaSecurityBrokerFilter extends BrokerFilter {
                 String clientId = kapuaPrincipal.getClientId();
                 KapuaId accountId = kapuaPrincipal.getAccountId();
                 String username = kapuaSecurityContext.getUserName();
-                String remoteAddress = (context.getConnection() != null) ? context.getConnection().getRemoteAddress() : "";
 
                 KapuaId scopeId = ((KapuaPrincipal) kapuaSecurityContext.getMainPrincipal()).getAccountId();
+                KapuaBrokerContextContainer kbcc = new KapuaBrokerContextContainer(brokerIdResolver.getBrokerId(this), username, clientId, info.getClientIp());
 
                 // multiple account stealing link fix
                 fullClientId = getFullClientId(scopeId.getId().longValue(), clientId);
 
-                if (!isAdminUser(username)) {
+                if (!isAdminUser(kbcc)) {
                     // Stealing link check
                     ConnectionId connectionId = CONNECTION_MAP.get(fullClientId);
 
@@ -1247,7 +1246,12 @@ public class KapuaSecurityBrokerFilter extends BrokerFilter {
         return entry;
     }
 
-    private void addAuthDestinationToLog(List<String> authDestinations, String message) {
+    protected boolean isAdminUser(KapuaBrokerContextContainer kbcc) {
+        String adminUsername = SystemSetting.getInstance().getString(SystemSettingKey.SYS_ADMIN_USERNAME);
+        return kbcc.getUserName().equals(adminUsername);
+    }
+
+    protected void addAuthDestinationToLog(List<String> authDestinations, String message) {
         if (logger.isDebugEnabled()) {
             authDestinations.add(message);
         }
@@ -1260,11 +1264,6 @@ public class KapuaSecurityBrokerFilter extends BrokerFilter {
                 logger.debug(str);
             }
         }
-    }
-
-    private boolean isAdminUser(String user) {
-        String adminAccount = SystemSetting.getInstance().getString(SystemSettingKey.SYS_ADMIN_ACCOUNT);
-        return user.equals(adminAccount);
     }
 
 }

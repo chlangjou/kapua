@@ -192,7 +192,7 @@ public class AccountServiceImpl extends AbstractKapuaConfigurableResourceLimited
                 throw new KapuaIllegalAccessException(action.name());
             }
 
-            if (settings.getString(SystemSettingKey.SYS_ADMIN_ACCOUNT).equals(accountx.getName())) {
+            if (settings.getString(SystemSettingKey.SYS_ADMIN_USERNAME).equals(accountx.getName())) {
                 throw new KapuaIllegalAccessException(action.name());
             }
 
