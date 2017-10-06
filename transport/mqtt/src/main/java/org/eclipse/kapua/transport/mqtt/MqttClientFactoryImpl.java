@@ -12,13 +12,13 @@
 package org.eclipse.kapua.transport.mqtt;
 
 import org.eclipse.kapua.KapuaException;
+import org.eclipse.kapua.commons.setting.system.SystemSetting;
+import org.eclipse.kapua.commons.setting.system.SystemSettingKey;
 import org.eclipse.kapua.locator.KapuaProvider;
 import org.eclipse.kapua.transport.TransportClientFactory;
 import org.eclipse.kapua.transport.message.mqtt.MqttMessage;
 import org.eclipse.kapua.transport.message.mqtt.MqttPayload;
 import org.eclipse.kapua.transport.message.mqtt.MqttTopic;
-import org.eclipse.kapua.transport.mqtt.setting.MqttClientSetting;
-import org.eclipse.kapua.transport.mqtt.setting.MqttClientSettingKeys;
 
 import java.util.Map;
 
@@ -43,6 +43,6 @@ public class MqttClientFactoryImpl implements TransportClientFactory<MqttTopic, 
     }
 
     private String formatBrokerUri(String serverIp) {
-        return MqttClientSetting.getInstance().getString(MqttClientSettingKeys.TRANSPORT_SCHEME) + "://" + serverIp + ":" + MqttClientSetting.getInstance().getString(MqttClientSettingKeys.TRANSPORT_PORT);
+        return SystemSetting.getInstance().getString(SystemSettingKey.BROKER_SCHEME) + "://" + serverIp + ":" + SystemSetting.getInstance().getString(SystemSettingKey.BROKER_PORT);
     }
 }

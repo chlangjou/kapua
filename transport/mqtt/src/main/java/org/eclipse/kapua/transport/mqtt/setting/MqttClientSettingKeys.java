@@ -49,20 +49,6 @@ public enum MqttClientSettingKeys implements SettingKey {
     TRANSPORT_TOPIC_SEPARATOR("transport.topic.separator"),
 
     /**
-     * The protocol needed to compose the full broker URI
-     *
-     * @since 1.0.0
-     */
-    TRANSPORT_SCHEME("transport.scheme"),
-
-    /**
-     * The port needed to compose the full broker URI
-     *
-     * @since 1.0.0
-     */
-    TRANSPORT_PORT("transport.port"),
-
-    /**
      * Timeout for send sync operations.
      * 
      * @since 1.0.0

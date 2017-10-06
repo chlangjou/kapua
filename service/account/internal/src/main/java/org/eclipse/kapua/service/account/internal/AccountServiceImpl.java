@@ -101,7 +101,7 @@ public class AccountServiceImpl extends AbstractKapuaConfigurableResourceLimited
             throw new KapuaIllegalArgumentException("scopeId", "max child account reached");
         }
 
-        Account createdAccount = entityManagerSession.onTransactedInsert(em -> {
+        return entityManagerSession.onTransactedInsert(em -> {
             Account account = AccountDAO.create(em, accountCreator);
             em.persist(account);
 
@@ -110,8 +110,6 @@ public class AccountServiceImpl extends AbstractKapuaConfigurableResourceLimited
             account.setParentAccountPath(parentAccountPath);
             return AccountDAO.update(em, account);
         });
-
-        return createdAccount;
     }
 
     @Override
@@ -131,7 +129,7 @@ public class AccountServiceImpl extends AbstractKapuaConfigurableResourceLimited
             authorizationService.checkPermission(permissionFactory.newPermission(ACCOUNT_DOMAIN, Actions.write, account.getId()));
         } else {
             // Editing child
-            authorizationService.checkPermission(permissionFactory.newPermission(ACCOUNT_DOMAIN, Actions.write, account.getScopeId()));
+        authorizationService.checkPermission(permissionFactory.newPermission(ACCOUNT_DOMAIN, Actions.write, account.getScopeId()));
         }
 
         //
