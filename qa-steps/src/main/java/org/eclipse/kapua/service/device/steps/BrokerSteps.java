@@ -43,6 +43,10 @@ import org.eclipse.kapua.service.device.management.packages.model.DevicePackages
 import org.eclipse.kapua.service.device.management.snapshot.DeviceSnapshotManagementService;
 import org.eclipse.kapua.service.device.registry.Device;
 import org.eclipse.kapua.service.device.registry.DeviceRegistryService;
+import org.eclipse.paho.client.mqttv3.MqttClient;
+import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
+import org.eclipse.paho.client.mqttv3.MqttException;
+import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.junit.Assert;
 
 import java.math.BigInteger;
@@ -70,6 +74,11 @@ public class BrokerSteps extends Assert {
      * Device death topic.
      */
     private static final String MQTT_DC = "$EDC/kapua-sys/rpione3/MQTT/DC";
+
+    /**
+     * URI of mqtt broker.
+     */
+    private static final String BROKER_URI = "tcp://localhost:1883";
 
     /**
      * Access to device management service.
@@ -256,6 +265,73 @@ public class BrokerSteps extends Assert {
 
         Integer commandExitCode = (Integer) stepData.get("commandExitCode");
         assertEquals(expectedExitCode, commandExitCode.intValue());
+    }
+
+    @When("^Client with name \"(.*)\" with client id \"(.*)\" user \"(.*)\" password \"(.*)\" is connected$")
+    public void clientConnect(String clientName, String clientId, String user, String password) throws Exception {
+        MqttClient mqttClient = null;
+        MqttConnectOptions clientOpts = new MqttConnectOptions();
+
+        try {
+            mqttClient = new MqttClient(BROKER_URI, clientId,
+                    new MemoryPersistence());
+        } catch (MqttException e) {
+            e.printStackTrace();
+        }
+        clientOpts.setUserName(user);
+        clientOpts.setPassword(password.toCharArray());
+        try {
+            mqttClient.connect(clientOpts);
+        } catch (MqttException e) {
+            e.printStackTrace();
+        }
+        if (mqttClient != null) {
+            stepData.put(clientName, mqttClient);
+        } else {
+            throw new Exception("Mqtt test client not connected.");
+        }
+    }
+
+    @When("^topic \"(.*)\" content \"(.*)\" is published by client named \"(.*)\"$")
+    public void publishMessageByClient(String topic, String content, String clientName) throws Exception {
+        MqttClient mqttClient = (MqttClient) stepData.get(clientName);
+        if (mqttClient == null) {
+            throw new Exception("Mqtt test client not found");
+        }
+        mqttClient.publish(topic, content.getBytes(), 0, false);
+    }
+
+    @Then("^Client named \"(.*)\" is connected$")
+    public void clientConnected(String clientName) throws Exception {
+        MqttClient mqttClient = (MqttClient) stepData.get(clientName);
+        if (mqttClient == null) {
+            throw new Exception("Mqtt test client not found");
+        }
+        assertEquals(true, mqttClient.isConnected());
+    }
+
+    @Then("^Client named \"(.*)\" is not connected$")
+    public void clientNotConnected(String clientName) throws Exception {
+        MqttClient mqttClient = (MqttClient) stepData.get(clientName);
+        if (mqttClient == null) {
+            throw new Exception("Mqtt test client not found");
+        }
+        assertEquals(false, mqttClient.isConnected());
+    }
+
+    @Then("^Disconnect client with name \"(.*)\"$")
+    public void disconnectClient(String clientName) throws Exception {
+        MqttClient mqttClient = (MqttClient) stepData.get(clientName);
+        if (mqttClient == null) {
+            throw new Exception("Mqtt test client not found");
+        }
+        try {
+            mqttClient.disconnect();
+            mqttClient.close();
+        } catch (Exception e) {
+            // Exception eaten on purpose.
+            // Disconnect is for sanity only.
+        }
     }
 
 }
