@@ -19,6 +19,7 @@ import cucumber.api.java.Before;
 import cucumber.api.java.en.Then;
 import cucumber.api.java.en.When;
 import cucumber.runtime.java.guice.ScenarioScoped;
+import org.eclipse.kapua.KapuaException;
 import org.eclipse.kapua.commons.model.id.KapuaEid;
 import org.eclipse.kapua.commons.security.KapuaSecurityUtils;
 import org.eclipse.kapua.commons.util.xml.JAXBContextProvider;
@@ -43,6 +44,8 @@ import org.eclipse.kapua.service.device.management.packages.model.DevicePackages
 import org.eclipse.kapua.service.device.management.snapshot.DeviceSnapshotManagementService;
 import org.eclipse.kapua.service.device.registry.Device;
 import org.eclipse.kapua.service.device.registry.DeviceRegistryService;
+import org.eclipse.kapua.service.device.registry.connection.DeviceConnection;
+import org.eclipse.kapua.service.device.registry.connection.DeviceConnectionService;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -117,6 +120,11 @@ public class BrokerSteps extends Assert {
     private DeviceCommandFactory deviceCommandFactory;
 
     /**
+     * Service for connecting devices.
+     */
+    private static DeviceConnectionService deviceConnectionService;
+
+    /**
      * Client simulating Kura device
      */
     private KuraDevice kuraDevice;
@@ -142,6 +150,7 @@ public class BrokerSteps extends Assert {
         deviceBundleManagementService = locator.getService(DeviceBundleManagementService.class);
         deviceCommandManagementService = locator.getService(DeviceCommandManagementService.class);
         deviceCommandFactory = locator.getFactory(DeviceCommandFactory.class);
+        deviceConnectionService = locator.getService(DeviceConnectionService.class);
 
         JAXBContextProvider consoleProvider = new TestJAXBContextProvider();
         XmlUtil.setContextProvider(consoleProvider);
@@ -266,6 +275,21 @@ public class BrokerSteps extends Assert {
         Integer commandExitCode = (Integer) stepData.get("commandExitCode");
         assertEquals(expectedExitCode, commandExitCode.intValue());
     }
+
+    @Then("^Device is connected with \"(.*)\" server ip$")
+    public void deviceWithServerIp(String serverIp) {
+
+        DeviceConnection deviceConn = null;
+        stepData.put("ExceptionCaught", false);
+        try {
+            deviceConn = deviceConnectionService.findByClientId(new KapuaEid(BigInteger.valueOf(1l)), "rpione3");
+        } catch (KapuaException ex) {
+            stepData.put("ExceptionCaught", true);
+            return;
+        }
+        assertEquals(serverIp, deviceConn.getServerIp());
+    }
+
 
     @When("^Client with name \"(.*)\" with client id \"(.*)\" user \"(.*)\" password \"(.*)\" is connected$")
     public void clientConnect(String clientName, String clientId, String user, String password) throws Exception {

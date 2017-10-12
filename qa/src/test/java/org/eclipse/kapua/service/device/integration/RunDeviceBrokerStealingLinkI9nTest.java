@@ -23,7 +23,7 @@ import org.junit.runner.RunWith;
                 "org.eclipse.kapua.service.user.steps",
                 "org.eclipse.kapua.service.device.steps"
                },
-        plugin = {"pretty", 
+        plugin = {"pretty",
                   "html:target/cucumber/DeviceBrokerStealingLinkI9n",
                   "json:target/DeviceBrokerStealingLinkI9n_cucumber.json"
                  },
