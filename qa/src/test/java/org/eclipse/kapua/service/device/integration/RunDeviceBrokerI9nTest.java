@@ -30,6 +30,6 @@ import cucumber.api.CucumberOptions;
                   "json:target/DeviceBrokerI9n_cucumber.json"
                  },
         monochrome = true )
-@CucumberProperty(key="broker.ip", value="192.168.33.10")
+@CucumberProperty(key="broker.ip", value="localhost")
 @CucumberProperty(key="kapua.config.url", value="")
 public class RunDeviceBrokerI9nTest {}
