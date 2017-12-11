@@ -9,28 +9,26 @@
  * Contributors:
  *     Eurotech - initial API and implementation
  *******************************************************************************/
-package org.eclipse.kapua.broker.core.message.system;
+package org.eclipse.kapua.broker.core.plugin.authentication;
 
-import org.eclipse.kapua.broker.core.plugin.KapuaConnectionContext;
+import org.eclipse.kapua.broker.core.plugin.Acl;
 
-/**
- * System message creator (i.e message sent by the broker on device connect)
- * 
- * @since 1.0
- */
-public interface SystemMessageCreator {
+public class AuthorizationEntry {
 
-    enum SystemMessageType {
-        CONNECT
+    private String address;
+    private Acl acl;
+
+    public AuthorizationEntry(String address, Acl acl) {
+        this.address = address;
+        this.acl = acl;
     }
 
-    /**
-     * Create a system message
-     * 
-     * @param systemMessageType
-     * @param kbcc
-     * @return
-     */
-    String createMessage(SystemMessageType systemMessageType, KapuaConnectionContext kcc);
+    public String getAddress() {
+        return address;
+    }
+
+    public Acl getAcl() {
+        return acl;
+    }
 
 }
