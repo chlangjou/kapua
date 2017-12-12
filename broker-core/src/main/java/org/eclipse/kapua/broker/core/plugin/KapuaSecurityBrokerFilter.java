@@ -38,7 +38,6 @@ import org.apache.activemq.broker.TransportConnector;
 import org.apache.activemq.broker.region.Subscription;
 import org.apache.activemq.command.ActiveMQDestination;
 import org.apache.activemq.command.ActiveMQTopic;
-import org.apache.activemq.command.ConnectionId;
 import org.apache.activemq.command.ConnectionInfo;
 import org.apache.activemq.command.ConsumerInfo;
 import org.apache.activemq.command.Message;
@@ -54,15 +53,14 @@ import org.apache.shiro.util.ThreadContext;
 import org.eclipse.kapua.KapuaErrorCode;
 import org.eclipse.kapua.KapuaErrorCodes;
 import org.eclipse.kapua.KapuaException;
-import org.eclipse.kapua.KapuaIllegalAccessException;
 import org.eclipse.kapua.KapuaRuntimeException;
-import org.eclipse.kapua.broker.core.BrokerDomain;
 import org.eclipse.kapua.broker.core.BrokerJAXBContextProvider;
 import org.eclipse.kapua.broker.core.message.MessageConstants;
 import org.eclipse.kapua.broker.core.message.system.DefaultSystemMessageCreator;
 import org.eclipse.kapua.broker.core.message.system.SystemMessageCreator;
 import org.eclipse.kapua.broker.core.message.system.SystemMessageCreator.SystemMessageType;
 import org.eclipse.kapua.broker.core.plugin.authentication.AdminAuthenticationLogic;
+import org.eclipse.kapua.broker.core.plugin.authentication.AuthenticationCallback;
 import org.eclipse.kapua.broker.core.plugin.authentication.UserAuthentictionLogic;
 import org.eclipse.kapua.broker.core.plugin.metric.ClientMetric;
 import org.eclipse.kapua.broker.core.plugin.metric.LoginMetric;
@@ -74,15 +72,12 @@ import org.eclipse.kapua.broker.core.pool.JmsAssistantProducerWrapper;
 import org.eclipse.kapua.broker.core.pool.JmsConsumerWrapper;
 import org.eclipse.kapua.broker.core.setting.BrokerSetting;
 import org.eclipse.kapua.broker.core.setting.BrokerSettingKey;
-import org.eclipse.kapua.commons.model.query.predicate.AndPredicate;
-import org.eclipse.kapua.commons.model.query.predicate.AttributePredicate;
 import org.eclipse.kapua.commons.security.KapuaSecurityUtils;
 import org.eclipse.kapua.commons.security.KapuaSession;
 import org.eclipse.kapua.commons.setting.system.SystemSetting;
 import org.eclipse.kapua.commons.setting.system.SystemSettingKey;
 import org.eclipse.kapua.commons.util.xml.XmlUtil;
 import org.eclipse.kapua.locator.KapuaLocator;
-import org.eclipse.kapua.model.id.KapuaId;
 import org.eclipse.kapua.service.account.Account;
 import org.eclipse.kapua.service.account.AccountService;
 import org.eclipse.kapua.service.authentication.AuthenticationService;
@@ -92,26 +87,11 @@ import org.eclipse.kapua.service.authentication.LoginCredentials;
 import org.eclipse.kapua.service.authentication.shiro.KapuaAuthenticationErrorCodes;
 import org.eclipse.kapua.service.authentication.shiro.KapuaAuthenticationException;
 import org.eclipse.kapua.service.authentication.token.AccessToken;
-import org.eclipse.kapua.service.authorization.AuthorizationService;
-import org.eclipse.kapua.service.authorization.domain.Domain;
-import org.eclipse.kapua.service.authorization.permission.Actions;
-import org.eclipse.kapua.service.authorization.permission.PermissionFactory;
-import org.eclipse.kapua.service.datastore.DatastoreDomain;
-import org.eclipse.kapua.service.device.management.commons.DeviceManagementDomain;
-import org.eclipse.kapua.service.device.registry.ConnectionUserCouplingMode;
-import org.eclipse.kapua.service.device.registry.connection.DeviceConnection;
-import org.eclipse.kapua.service.device.registry.connection.DeviceConnectionCreator;
-import org.eclipse.kapua.service.device.registry.connection.DeviceConnectionFactory;
-import org.eclipse.kapua.service.device.registry.connection.DeviceConnectionService;
-import org.eclipse.kapua.service.device.registry.connection.DeviceConnectionStatus;
-import org.eclipse.kapua.service.device.registry.connection.option.DeviceConnectionOptionFactory;
-import org.eclipse.kapua.service.device.registry.connection.option.DeviceConnectionOptionPredicates;
-import org.eclipse.kapua.service.device.registry.connection.option.DeviceConnectionOptionQuery;
-import org.eclipse.kapua.service.device.registry.connection.option.DeviceConnectionOptionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.Timer.Context;
+import com.google.common.collect.ImmutableList;
 
 /**
  * ActiveMQ broker filter plugin implementation (security filter).<br>
@@ -124,9 +104,16 @@ import com.codahale.metrics.Timer.Context;
  * 
  * This filter is added inside ActiveMQ filter chain plugin by {@link org.eclipse.kapua.broker.core.KapuaBrokerSecurityPlugin}
  */
-public class KapuaSecurityBrokerFilter extends BrokerFilter {
+public class KapuaSecurityBrokerFilter extends BrokerFilter implements AuthenticationCallback {
 
     protected final static Logger logger = LoggerFactory.getLogger(KapuaSecurityBrokerFilter.class);
+
+    protected final static List<String> VT_DURABLE_PREFIX = ImmutableList.of(
+            "Consumer.{0}:AT_LEAST_ONCE.{1}", "Consumer.{0}:EXACTLY_ONCE.{1}");
+    protected final static String VT_CONSUMER_PREFIX = "Consumer";
+    // full client id, with account prepended
+    protected final static String MULTI_ACCOUNT_CLIENT_ID = "{0}:{1}";
+    public static final String VT_TOPIC_PREFIX = "VirtualTopic.";
 
     private final static String CONNECT_MESSAGE_TOPIC_PATTERN = "VirtualTopic.%s.%s.%s.MQTT.CONNECT";
     private final static String CANNOT_LOAD_INSTANCE_ERROR_MSG = "Cannot load instance %s for %s. Please check the configuration file!";
@@ -153,40 +140,25 @@ public class KapuaSecurityBrokerFilter extends BrokerFilter {
     protected JmsConsumerWrapper stealingLinkManagerConsumer;
     protected String brokerId;
 
-    protected final static Map<String, ConnectionId> CONNECTION_MAP = new ConcurrentHashMap<>();
+    protected final static Map<String, String> CONNECTION_MAP = new ConcurrentHashMap<>();
     private final static String CONNECTOR_NAME_VM = String.format("vm://%s", BrokerSetting.getInstance().getString(BrokerSettingKey.BROKER_NAME));
-
-    private static final Domain BROKER_DOMAIN = new BrokerDomain();
-    private static final Domain DATASTORE_DOMAIN = new DatastoreDomain();
-    private static final Domain DEVICE_MANAGEMENT_DOMAIN = new DeviceManagementDomain();
 
     private AdminAuthenticationLogic adminAuthenticationLogic;
     private UserAuthentictionLogic userAuthentictionLogic;
 
     private AuthenticationService authenticationService = KapuaLocator.getInstance().getService(AuthenticationService.class);
-    private AuthorizationService authorizationService = KapuaLocator.getInstance().getService(AuthorizationService.class);
-    private PermissionFactory permissionFactory = KapuaLocator.getInstance().getFactory(PermissionFactory.class);
     private CredentialsFactory credentialsFactory = KapuaLocator.getInstance().getFactory(CredentialsFactory.class);
     private AccountService accountService = KapuaLocator.getInstance().getService(AccountService.class);
-    private DeviceConnectionService deviceConnectionService = KapuaLocator.getInstance().getService(DeviceConnectionService.class);
-    private DeviceConnectionFactory deviceConnectionFactory = KapuaLocator.getInstance().getFactory(DeviceConnectionFactory.class);
-    private DeviceConnectionOptionFactory deviceConnectionOptionFactory = KapuaLocator.getInstance().getFactory(DeviceConnectionOptionFactory.class);
-    private DeviceConnectionOptionService deviceConnectionOptionService = KapuaLocator.getInstance().getService(DeviceConnectionOptionService.class);
 
-    private ClientMetric clientMetric;
-    private LoginMetric loginMetric;
-    private PublishMetric publishMetric;
-    private SubscribeMetric subscribeMetric;
+    private ClientMetric clientMetric = ClientMetric.getInstance();
+    private LoginMetric loginMetric = LoginMetric.getInstance();
+    private PublishMetric publishMetric = PublishMetric.getInstance();
+    private SubscribeMetric subscribeMetric = SubscribeMetric.getInstance();
 
     public KapuaSecurityBrokerFilter(Broker next) throws KapuaException {
         super(next);
-        adminAuthenticationLogic = new AdminAuthenticationLogic();
-        userAuthentictionLogic = new UserAuthentictionLogic();
-
-        clientMetric = ClientMetric.getInstance();
-        loginMetric = LoginMetric.getInstance();
-        publishMetric = PublishMetric.getInstance();
-        subscribeMetric = SubscribeMetric.getInstance();
+        adminAuthenticationLogic = new AdminAuthenticationLogic(VT_TOPIC_PREFIX, SystemSetting.getInstance().getMessageClassifier(), "ActiveMQ.Advisory.>");
+        userAuthentictionLogic = new UserAuthentictionLogic(VT_TOPIC_PREFIX, SystemSetting.getInstance().getMessageClassifier(), "ActiveMQ.Advisory.>");
 
         XmlUtil.setContextProvider(new BrokerJAXBContextProvider());
     }
@@ -334,7 +306,7 @@ public class KapuaSecurityBrokerFilter extends BrokerFilter {
                             logger.debug("Invalid message context. Try parsing the topic.");
                             throw new KapuaException(KapuaErrorCodes.ILLEGAL_ARGUMENT, "Invalid message context");
                         }
-                        return new KapuaConnectionContext(scopeId, clientId);
+                        return new KapuaConnectionContext(scopeId, clientId, MULTI_ACCOUNT_CLIENT_ID);
                     }
 
                     private KapuaConnectionContext parseTopicInfo(javax.jms.Message message) throws JMSException, KapuaException {
@@ -348,7 +320,7 @@ public class KapuaSecurityBrokerFilter extends BrokerFilter {
                         String clientId = topic[2];
                         Account account = KapuaSecurityUtils.doPrivileged(() -> accountService.findByName(accountName));
                         Long scopeId = account.getId().getId().longValue();
-                        return new KapuaConnectionContext(scopeId, clientId);
+                        return new KapuaConnectionContext(scopeId, clientId, MULTI_ACCOUNT_CLIENT_ID);
                     }
 
                 });
@@ -357,6 +329,9 @@ public class KapuaSecurityBrokerFilter extends BrokerFilter {
     protected void unregisterStealingLinkManager() {
         if (stealingLinkManagerConsumer != null) {
             stealingLinkManagerConsumer.close();
+        }
+        if (stealingLinkManagerFuture != null) {
+            stealingLinkManagerFuture.cancel(true);
         }
     }
 
@@ -448,12 +423,10 @@ public class KapuaSecurityBrokerFilter extends BrokerFilter {
             Context loginShiroLoginTimeContext = loginMetric.getShiroLoginTime().time();
             LoginCredentials credentials = credentialsFactory.newUsernamePasswordCredentials(kcc.getUserName(), info.getPassword());
             AccessToken accessToken = authenticationService.login(credentials);
-            KapuaId scopeId = accessToken.getScopeId();
-            KapuaId userId = accessToken.getUserId();
 
             final Account account;
             try {
-                account = KapuaSecurityUtils.doPrivileged(() -> accountService.find(scopeId));
+                account = KapuaSecurityUtils.doPrivileged(() -> accountService.find(accessToken.getScopeId()));
             } catch (Exception e) {
                 // to preserve the original exception message (if possible)
                 if (e instanceof AuthenticationException) {
@@ -463,91 +436,23 @@ public class KapuaSecurityBrokerFilter extends BrokerFilter {
                 }
             }
 
-            kcc.update(accessToken, account.getName(), scopeId, (((TransportConnector) context.getConnector()).getName()));
+            kcc.update(accessToken, account.getName(), accessToken.getScopeId(), accessToken.getUserId(), (((TransportConnector) context.getConnector()).getName()),
+                    brokerIpResolver.getBrokerIpOrHostName(), MULTI_ACCOUNT_CLIENT_ID);
             loginShiroLoginTimeContext.stop();
 
-            DeviceConnection deviceConnection = null;
-            // 3) check authorization
             DefaultAuthorizationMap authMap = null;
             if (isAdminUser(kcc)) {
                 loginMetric.getKapuasysTokenAttempt().inc();
-                // 3-1) admin authMap
-                authMap = buildAuthorization(kcc, adminAuthenticationLogic.buildAuthorizationMap(kcc));
+                List<org.eclipse.kapua.broker.core.plugin.authentication.AuthorizationEntry> authorizationEntries = adminAuthenticationLogic.connect(kcc, this);
+                authMap = buildAuthorization(kcc, authorizationEntries);
                 clientMetric.getConnectedKapuasys().inc();
             } else {
-                Context loginNormalUserTimeContext = loginMetric.getNormalUserTime().time();
                 loginMetric.getNormalUserAttempt().inc();
-                // 3-3) check permissions
-
-                Context loginCheckAccessTimeContext = loginMetric.getCheckAccessTime().time();
-                boolean[] hasPermissions = new boolean[] {
-                        // TODO check the permissions... move them to a constants class?
-                        authorizationService.isPermitted(permissionFactory.newPermission(BROKER_DOMAIN, Actions.connect, scopeId)),
-                        authorizationService.isPermitted(permissionFactory.newPermission(DEVICE_MANAGEMENT_DOMAIN, Actions.write, scopeId)),
-                        authorizationService.isPermitted(permissionFactory.newPermission(DATASTORE_DOMAIN, Actions.read, scopeId)),
-                        authorizationService.isPermitted(permissionFactory.newPermission(DATASTORE_DOMAIN, Actions.write, scopeId))
-                };
-                if (!hasPermissions[AclConstants.BROKER_CONNECT_IDX]) {
-                    throw new KapuaIllegalAccessException(permissionFactory.newPermission(BROKER_DOMAIN, Actions.connect, scopeId).toString());
-                }
-                loginCheckAccessTimeContext.stop();
-
-                // 3-4) build authMap
-                kcc.updatePermissions(hasPermissions);
-                authMap = buildAuthorization(kcc, userAuthentictionLogic.buildAuthorizationMap(kcc));
-
-                // 4) find device
-                Context loginFindClientIdTimeContext = loginMetric.getFindClientIdTime().time();
-                deviceConnection = KapuaSecurityUtils.doPrivileged(() -> deviceConnectionService.findByClientId(kcc.getScopeId(), kcc.getClientId()));
-                loginFindClientIdTimeContext.stop();
-                // enforce the user-device bound
-                enforceDeviceConnectionUserBound(KapuaSecurityUtils.doPrivileged(() -> deviceConnectionService.getConfigValues(scopeId)), deviceConnection, scopeId, userId);
-
-                Context loginFindDevTimeContext = loginMetric.getFindDevTime().time();
-
-                // send connect message
-                ConnectionId previousConnectionId = CONNECTION_MAP.put(kcc.getFullClientId(), info.getConnectionId());
-                boolean stealingLinkDetected = (previousConnectionId != null);
-                if (deviceConnection == null) {
-                    DeviceConnectionCreator deviceConnectionCreator = deviceConnectionFactory.newCreator(scopeId);
-                    deviceConnectionCreator.setClientId(kcc.getClientId());
-                    deviceConnectionCreator.setClientIp(kcc.getClientIp());
-                    deviceConnectionCreator.setProtocol(kcc.getConnectorDescriptor().getTransportProtocol());
-                    deviceConnectionCreator.setServerIp(brokerIpResolver.getBrokerIpOrHostName());
-                    deviceConnectionCreator.setUserId(userId);
-                    deviceConnectionCreator.setUserCouplingMode(ConnectionUserCouplingMode.INHERITED);
-                    deviceConnectionCreator.setAllowUserChange(false);
-                    deviceConnection = KapuaSecurityUtils.doPrivileged(() -> deviceConnectionService.create(deviceConnectionCreator));
-                } else {
-                    deviceConnection.setClientIp(kcc.getClientIp());
-                    deviceConnection.setProtocol(kcc.getConnectorDescriptor().getTransportProtocol());
-                    deviceConnection.setServerIp(brokerIpResolver.getBrokerIpOrHostName());
-                    deviceConnection.setUserId(userId);
-                    deviceConnection.setStatus(DeviceConnectionStatus.CONNECTED);
-                    deviceConnection.setAllowUserChange(false);
-                    final DeviceConnection deviceConnectionToUpdate = deviceConnection;
-                    KapuaSecurityUtils.doPrivileged(() -> deviceConnectionService.update(deviceConnectionToUpdate));
-                    // TODO implement the banned status
-                    // if (DeviceStatus.DISABLED.equals(device.getStatus())) {
-                    // throw new KapuaIllegalAccessException("clientId - This client ID is disabled and cannot connect");
-                    // }
-                    // TODO manage the stealing link event (may be a good idea to use different connect status (connect -stealing)?
-                    if (stealingLinkDetected) {
-                        loginMetric.getStealingLinkConnect().inc();
-
-                        // stealing link detected, skip info
-                        logger.warn("Detected Stealing link for cliend id {} - account - last connection id was {} - current connection id is {} - IP: {} - No connection status changes!",
-                                new Object[] { kcc.getClientId(), kcc.getAccountName(), previousConnectionId, info.getConnectionId(), info.getClientIp() });
-                    }
-                }
-                loginFindDevTimeContext.stop();
-
-                loginNormalUserTimeContext.stop();
-                sendConnectMessage(kcc);
+                List<org.eclipse.kapua.broker.core.plugin.authentication.AuthorizationEntry> authorizationEntries = userAuthentictionLogic.connect(kcc, this);
+                authMap = buildAuthorization(kcc, authorizationEntries);
                 clientMetric.getConnectedClient().inc();
+                sendConnectMessage(kcc);
             }
-
-            kcc.setKapuaConnectionId(deviceConnection);
             context.setSecurityContext(new KapuaSecurityContext(kcc, authMap));
 
             // multiple account stealing link fix
@@ -596,81 +501,10 @@ public class KapuaSecurityBrokerFilter extends BrokerFilter {
         }
     }
 
-    private void enforceDeviceConnectionUserBound(Map<String, Object> options, DeviceConnection deviceConnection, KapuaId scopeId, KapuaId userId) throws KapuaException {
-        if (deviceConnection != null) {
-            ConnectionUserCouplingMode connectionUserCouplingMode = deviceConnection.getUserCouplingMode();
-            if (ConnectionUserCouplingMode.INHERITED.equals(deviceConnection.getUserCouplingMode())) {
-                connectionUserCouplingMode = loadConnectionUserCouplingModeFromConfig(scopeId, options);
-            }
-            enforceDeviceUserBound(connectionUserCouplingMode, deviceConnection, scopeId, userId);
-        } else {
-            logger.debug("Enforce Device-User bound - no device connection found so user account settings for enforcing the bound (user id - '{}')", userId);
-            enforceDeviceUserBound(loadConnectionUserCouplingModeFromConfig(scopeId, options), deviceConnection, scopeId, userId);
-        }
-    }
-
-    private void enforceDeviceUserBound(ConnectionUserCouplingMode connectionUserCouplingMode, DeviceConnection deviceConnection, KapuaId scopeId, KapuaId userId)
-            throws KapuaException {
-        if (ConnectionUserCouplingMode.STRICT.equals(connectionUserCouplingMode)) {
-            if (deviceConnection == null) {
-                checkConnectionCountByReservedUserId(scopeId, userId, 0);
-            } else {
-                if (deviceConnection.getReservedUserId() == null) {
-                    checkConnectionCountByReservedUserId(scopeId, userId, 0);
-                    if (!deviceConnection.getAllowUserChange() && !userId.equals(deviceConnection.getUserId())) {
-                        throw new SecurityException("User not authorized!");
-                        // TODO manage the error message. is it better to throw a more specific exception or keep it obfuscated for security reason?
-                    }
-                }
-                else {
-                    checkConnectionCountByReservedUserId(scopeId, deviceConnection.getReservedUserId(), 1);
-                    if (!userId.equals(deviceConnection.getReservedUserId())) {
-                        throw new SecurityException("User not authorized!");
-                        // TODO manage the error message. is it better to throw a more specific exception or keep it obfuscated for security reason?
-                    }
-                }
-            }
-        }
-        else {
-            if (deviceConnection != null && deviceConnection.getReservedUserId() != null && userId.equals(deviceConnection.getReservedUserId())) {
-                checkConnectionCountByReservedUserId(scopeId, userId, 1);
-            } else {
-                checkConnectionCountByReservedUserId(scopeId, userId, 0);
-            }
-        }
-    }
-
-    private void checkConnectionCountByReservedUserId(KapuaId scopeId, KapuaId userId, long count) throws KapuaException {
-        // check that no devices have this user as strict user
-        DeviceConnectionOptionQuery query = deviceConnectionOptionFactory.newQuery(scopeId);
-
-        AndPredicate andPredicate = new AndPredicate();
-        andPredicate.and(new AttributePredicate<>(DeviceConnectionOptionPredicates.RESERVED_USER_ID, userId));
-        query.setPredicate(andPredicate);
-        query.setLimit(1);
-
-        Long connectionCountByReservedUserId = KapuaSecurityUtils.doPrivileged(() -> deviceConnectionOptionService.count(query));
-        if (connectionCountByReservedUserId != null && connectionCountByReservedUserId > count) {
-            throw new SecurityException("User not authorized!");
-            // TODO manage the error message. is it better to throw a more specific exception or keep it obfuscated for security reason?
-        }
-    }
-
-    private ConnectionUserCouplingMode loadConnectionUserCouplingModeFromConfig(KapuaId scopeId, Map<String, Object> options) throws KapuaException {
-        String tmp = (String) options.get("deviceConnectionUserCouplingDefaultMode");// TODO move to constants
-        if (tmp != null) {
-            ConnectionUserCouplingMode tmpConnectionUserCouplingMode = ConnectionUserCouplingMode.valueOf(tmp);
-            if (tmpConnectionUserCouplingMode == null) {
-                throw new SecurityException(String
-                        .format("Cannot parse the default Device-User coupling mode in the registry service configuration! (found '%s' - allowed values are 'LOOSE' - 'STRICT')", tmp));
-                // TODO manage the error message. is it better to throw a more specific exception or keep it obfuscated for security reason?
-            } else {
-                return tmpConnectionUserCouplingMode;
-            }
-        } else {
-            throw new SecurityException("Cannot find default Device-User coupling mode in the registry service configuration! (deviceConnectionUserCouplingDefaultMode");
-            // TODO manage the error message. is it better to throw a more specific exception or keep it obfuscated for security reason?
-        }
+    @Override
+    public String getConnectionId(KapuaConnectionContext kcc) {
+        String connectionId = CONNECTION_MAP.put(kcc.getFullClientId(), kcc.getConnectionId());
+        return connectionId;
     }
 
     protected void sendConnectMessage(KapuaConnectionContext kcc) {
@@ -699,55 +533,17 @@ public class KapuaSecurityBrokerFilter extends BrokerFilter {
         if (!isPassThroughConnection(context)) {
             Context loginRemoveConnectionTimeContext = loginMetric.getRemoveConnectionTime().time();
             KapuaConnectionContext kcc = new KapuaConnectionContext(brokerIdResolver.getBrokerId(this), info);
+            kcc.updateOldConnectionId(CONNECTION_MAP.get(kcc.getFullClientId()));
             try {
                 KapuaSecurityContext kapuaSecurityContext = getKapuaSecurityContext(context);
                 // TODO fix the kapua session when run as feature will be implemented
                 KapuaSecurityUtils.setSession(new KapuaSession((KapuaPrincipal) kapuaSecurityContext.getMainPrincipal()));
                 if (!isAdminUser(kcc)) {
-                    // Stealing link check
-                    ConnectionId connectionId = CONNECTION_MAP.get(kcc.getFullClientId());
-
-                    boolean stealingLinkDetected = false;
-                    if (connectionId != null) {
-                        stealingLinkDetected = !connectionId.equals(kcc.getConnectionId());
-                    } else {
-                        logger.error("Cannot find connection id for client id {} on connection map. Correct connection id is {} - IP: {}",
-                                new Object[] { kcc.getClientId(), kcc.getConnectionId(), kcc.getClientIp() });
-                    }
-                    if (stealingLinkDetected) {
-                        loginMetric.getStealingLinkDisconnect().inc();
-                        // stealing link detected, skip info
-                        logger.warn("Detected Stealing link for cliend id {} - account id {} - last connection id was {} - current connection id is {} - IP: {} - No disconnection info will be added!",
-                                new Object[] { kcc.getClientId(), kcc.getScopeId(), connectionId, kcc.getConnectionId(), kcc.getClientIp() });
-                    } else {
-                        final DeviceConnection deviceConnection;
-                        try {
-                            deviceConnection = KapuaSecurityUtils.doPrivileged(() -> deviceConnectionService.findByClientId(kcc.getScopeId(), kcc.getClientId()));
-                        } catch (Exception e) {
-                            throw new ShiroException("Error while looking for device connection on updating the device!", e);
-                        }
-                        if (deviceConnection != null) {
-                            // the device connection must be not null
-                            // update device connection (if the disconnection wasn't caused by a stealing link)
-                            if (error instanceof KapuaDuplicateClientIdException) {
-                                logger.debug("Skip device connection status update since is coming from a stealing link condition. Client id: {} - Connection id: {}",
-                                        new Object[] { kcc.getClientId(), connectionId != null ? connectionId.getValue() : "NULL" });
-                            } else {
-                                deviceConnection.setStatus(error == null ? DeviceConnectionStatus.DISCONNECTED : DeviceConnectionStatus.MISSING);
-                                try {
-                                    KapuaSecurityUtils.doPrivileged(() -> {
-                                        deviceConnectionService.update(deviceConnection);
-                                        return null;
-                                    });
-                                } catch (Exception e) {
-                                    throw new ShiroException("Error while updating the device connection status!", e);
-                                }
-                            }
-                        }
-                    }
-                    clientMetric.getDisconnectionClient().inc();
-                } else {
                     clientMetric.getDisconnectionKapuasys().inc();
+                    userAuthentictionLogic.disconnect(kcc, this, error);
+                } else {
+                    clientMetric.getDisconnectionClient().inc();
+                    adminAuthenticationLogic.disconnect(kcc, this, error);
                 }
                 // multiple account stealing link fix
                 info.setClientId(kcc.getFullClientId());
@@ -828,7 +624,7 @@ public class KapuaSecurityBrokerFilter extends BrokerFilter {
         ActiveMQDestination destination = messageSend.getDestination();
         if (destination instanceof ActiveMQTopic) {
             ActiveMQTopic destinationTopic = (ActiveMQTopic) destination;
-            messageSend.setProperty(MessageConstants.PROPERTY_ORIGINAL_TOPIC, destinationTopic.getTopicName().substring(AclConstants.VT_TOPIC_PREFIX.length()));
+            messageSend.setProperty(MessageConstants.PROPERTY_ORIGINAL_TOPIC, destinationTopic.getTopicName().substring(VT_TOPIC_PREFIX.length()));
         }
         publishMetric.getAllowedMessages().inc();
         super.send(producerExchange, messageSend);
@@ -858,7 +654,7 @@ public class KapuaSecurityBrokerFilter extends BrokerFilter {
             String[] destinationsPath = info.getDestination().getDestinationPaths();
             String destination = info.getDestination().getPhysicalName();
             KapuaSecurityContext kapuaSecurityContext = getKapuaSecurityContext(context);
-            if (destinationsPath != null && destinationsPath.length >= 2 && destinationsPath[0].equals(AclConstants.VT_CONSUMER_PREFIX)) {
+            if (destinationsPath != null && destinationsPath.length >= 2 && destinationsPath[0].equals(VT_CONSUMER_PREFIX)) {
                 StringBuilder sb = new StringBuilder();
                 sb.append(destination.substring(0, destinationsPath[0].length() + 1));
                 sb.append(context.getClientId());
@@ -915,10 +711,10 @@ public class KapuaSecurityBrokerFilter extends BrokerFilter {
             if (entry.getAcl().isRead()) {
                 // logger.info("pattern {} - clientid {} - topic {} - evaluated {}", new Object[]{JmsConstants.ACL_VT_DURABLE_PREFIX[0], clientId, topic,
                 // MessageFormat.format(JmsConstants.ACL_VT_DURABLE_PREFIX[0], fullClientId, topic)});
-                entries.add(createAuthorizationEntry(kcc, entry.getAcl(), MessageFormat.format(AclConstants.ACL_VT_DURABLE_PREFIX.get(0), kcc.getFullClientId(), entry.getAddress())));
+                entries.add(createAuthorizationEntry(kcc, entry.getAcl(), MessageFormat.format(VT_DURABLE_PREFIX.get(0), kcc.getFullClientId(), entry.getAddress())));
                 // logger.info("pattern {} - clientid {} - topic {} - evaluated {}", new Object[]{JmsConstants.ACL_VT_DURABLE_PREFIX[1], clientId, topic,
                 // MessageFormat.format(JmsConstants.ACL_VT_DURABLE_PREFIX[1], fullClientId, topic)});
-                entries.add(createAuthorizationEntry(kcc, entry.getAcl(), MessageFormat.format(AclConstants.ACL_VT_DURABLE_PREFIX.get(1), kcc.getFullClientId(), entry.getAddress())));
+                entries.add(createAuthorizationEntry(kcc, entry.getAcl(), MessageFormat.format(VT_DURABLE_PREFIX.get(1), kcc.getFullClientId(), entry.getAddress())));
             }
         }
         return new DefaultAuthorizationMap(entries);
