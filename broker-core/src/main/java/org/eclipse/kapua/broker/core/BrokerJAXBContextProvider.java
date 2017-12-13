@@ -9,12 +9,16 @@
  * Contributors:
  *     Eurotech - initial API and implementation
  *******************************************************************************/
-package org.eclipse.kapua.broker.core.plugin;
+package org.eclipse.kapua.broker.core;
 
 import javax.xml.bind.JAXBContext;
 import javax.xml.bind.JAXBException;
 
 import org.eclipse.kapua.KapuaException;
+import org.eclipse.kapua.broker.core.router.EndChainEndPoint;
+import org.eclipse.kapua.broker.core.router.EndPointContainer;
+import org.eclipse.kapua.broker.core.router.ParentEndPoint;
+import org.eclipse.kapua.broker.core.router.SimpleEndPoint;
 import org.eclipse.kapua.commons.configuration.metatype.TscalarImpl;
 import org.eclipse.kapua.commons.util.xml.JAXBContextProvider;
 import org.eclipse.kapua.model.config.metatype.KapuaTad;
@@ -47,7 +51,11 @@ public class BrokerJAXBContextProvider implements JAXBContextProvider {
                     KapuaToption.class,
                     KapuaTdesignate.class,
                     KapuaTobject.class,
-                    MetatypeXmlRegistry.class
+                    MetatypeXmlRegistry.class,
+                    EndPointContainer.class,
+                    SimpleEndPoint.class,
+                    ParentEndPoint.class,
+                    EndChainEndPoint.class
             };
             try {
                 context = JAXBContextFactory.createContext(classes, null);
